@@ -1,7 +1,8 @@
-use crate::models::Error;
+use crate::models::{Error, MessageResponse};
 use reqwest::Client;
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 use todel::models::{Info, Message};
+use tokio::time;
 
 /// The default rest url
 pub const REST_URL: &str = "https://eludris.tooty.xyz";
@@ -71,17 +72,34 @@ impl HttpClient {
         author: T,
         content: C,
     ) -> Error<Message> {
-        Ok(self
-            .client
-            .post(format!("{}/messages", self.rest_url))
-            .json(&Message {
-                author: author.to_string(),
-                content: content.to_string(),
-            })
-            .send()
-            .await?
-            .json()
-            .await?)
+        loop {
+            match self
+                .client
+                .post(format!("{}/messages", self.rest_url))
+                .json(&Message {
+                    author: author.to_string(),
+                    content: content.to_string(),
+                })
+                .send()
+                .await?
+                .json::<MessageResponse>()
+                .await
+            {
+                Ok(MessageResponse::Message(msg)) => {
+                    break Ok(msg);
+                }
+                Ok(MessageResponse::Ratelimited(data)) => {
+                    log::info!(
+                        "Client got ratelimited at /messages, retrying in {}ms",
+                        data.data.retry_after
+                    );
+                    time::sleep(Duration::from_millis(data.data.retry_after)).await;
+                }
+                Err(err) => {
+                    break Err(err)?;
+                }
+            }
+        }
     }
 
     /// Send a message using the client's [`HttpClient::user_name`]
