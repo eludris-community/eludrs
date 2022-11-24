@@ -1,13 +1,14 @@
 use std::{
     pin::Pin,
-    task::{Context, Poll},
+    sync::Arc,
+    task::{Context, Poll, Waker},
     thread,
     time::Duration,
 };
 
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
 use todel::models::Message;
-use tokio::{net::TcpStream, task::JoinHandle, time};
+use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
 };
@@ -17,12 +18,14 @@ use crate::models::Error;
 /// The default gateway url
 pub const GATEWAY_URL: &str = "wss://eludris.tooty.xyz/ws/";
 
+type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
+
 /// A Stream of Pandemonium events
 #[derive(Debug)]
 pub struct Events {
     gateway_url: String,
-    rx: Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    ping: Option<JoinHandle<()>>,
+    rx: Arc<Mutex<Option<WsReceiver>>>,
+    ping: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 /// Simple gateway client
@@ -71,19 +74,20 @@ impl Events {
     fn new(gateway_url: String) -> Self {
         Self {
             gateway_url,
-            rx: None,
-            ping: None,
+            rx: Arc::new(Mutex::new(None)),
+            ping: Arc::new(Mutex::new(None)),
         }
     }
 
     async fn connect(&mut self) -> Error<()> {
         log::debug!("Events connecting");
-        if let Some(ping) = &self.ping {
-            ping.abort();
+        let mut ping = self.ping.lock().await;
+        if ping.is_some() {
+            ping.as_mut().unwrap().abort();
         }
         let (socket, _) = connect_async(&self.gateway_url).await?;
         let (mut tx, rx) = socket.split();
-        self.ping = Some(tokio::spawn(async move {
+        *ping = Some(tokio::spawn(async move {
             loop {
                 match tx.send(WSMessage::Ping(vec![])).await {
                     Ok(_) => time::sleep(Duration::from_secs(20)).await,
@@ -94,18 +98,63 @@ impl Events {
                 }
             }
         }));
-        self.rx = Some(rx);
+        *self.rx.lock().await = Some(rx);
         Ok(())
+    }
+
+    async fn reconect(
+        waker: Waker,
+        gateway_url: String,
+        rx: Arc<Mutex<Option<WsReceiver>>>,
+        ping: Arc<Mutex<Option<JoinHandle<()>>>>,
+    ) {
+        let mut wait = 1;
+        loop {
+            let mut ping = ping.lock().await;
+            if ping.is_some() {
+                ping.as_mut().unwrap().abort();
+            }
+            match connect_async(&gateway_url).await {
+                Ok((socket, _)) => {
+                    let (mut tx, new_rx) = socket.split();
+                    *ping = Some(tokio::spawn(async move {
+                        loop {
+                            match tx.send(WSMessage::Ping(vec![])).await {
+                                Ok(_) => time::sleep(Duration::from_secs(20)).await,
+                                Err(err) => {
+                                    log::debug!("Encountered error while pinging {:?}", err);
+                                    break;
+                                }
+                            }
+                        }
+                    }));
+                    *rx.lock().await = Some(new_rx);
+                    log::debug!("Reconnected to websocket");
+                    break;
+                }
+                Err(err) => {
+                    log::info!(
+                        "Websocket reconnection failed {}, trying again in {}s",
+                        err,
+                        wait
+                    );
+                    thread::sleep(Duration::from_secs(wait));
+                    wait *= 2;
+                }
+            }
+        }
+        waker.wake();
     }
 }
 
 impl Stream for Events {
     type Item = Message;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            match &mut self.rx {
-                Some(rx) => match rx.poll_next_unpin(cx) {
+            let mut rx = futures::executor::block_on(async { self.rx.lock().await });
+            if rx.is_some() {
+                match rx.as_mut().unwrap().poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => match msg {
                         WSMessage::Text(msg) => {
                             if let Ok(msg) = serde_json::from_str(&msg) {
@@ -114,49 +163,29 @@ impl Stream for Events {
                         }
                         WSMessage::Close(_) => {
                             log::debug!("Websocket closed, reconnecting");
-                            let mut wait = 1;
-                            loop {
-                                if futures::executor::block_on(async { self.connect().await })
-                                    .is_err()
-                                {
-                                    log::info!(
-                                        "Websocket reconnection failed, trying again in {}s",
-                                        wait
-                                    );
-                                    thread::sleep(Duration::from_secs(wait));
-                                    wait *= 2;
-                                } else {
-                                    log::debug!("Reconnected to websocket");
-                                    break;
-                                }
-                            }
+                            tokio::spawn(Events::reconect(
+                                cx.waker().clone(),
+                                self.gateway_url.clone(),
+                                Arc::clone(&self.rx),
+                                Arc::clone(&self.ping),
+                            ));
+                            return Poll::Pending;
                         }
                         _ => {}
                     },
                     Poll::Pending => break Poll::Pending,
                     Poll::Ready(None) => {
                         log::debug!("Websocket closed, reconnecting");
-                        let mut wait = 1;
-                        loop {
-                            if futures::executor::block_on(async { self.connect().await }).is_err()
-                            {
-                                log::info!(
-                                    "Websocket reconnection failed, trying again in {}s",
-                                    wait
-                                );
-                                thread::sleep(Duration::from_secs(wait));
-                                if wait < 64 {
-                                    wait *= 2;
-                                }
-                            } else {
-                                log::debug!("Reconnected to websocket");
-                                break;
-                            }
-                        }
+                        tokio::spawn(Events::reconect(
+                            cx.waker().clone(),
+                            self.gateway_url.clone(),
+                            Arc::clone(&self.rx),
+                            Arc::clone(&self.ping),
+                        ));
+                        return Poll::Pending;
                     }
                     _ => {}
-                },
-                None => unreachable!(),
+                }
             }
         }
     }
