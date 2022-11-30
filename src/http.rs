@@ -1,7 +1,10 @@
-use crate::models::{Error, MessageResponse};
+use crate::{
+    models::{Error, MessageResponse},
+    GatewayClient,
+};
 use reqwest::Client;
 use std::{fmt::Display, time::Duration};
-use todel::models::{Info, Message};
+use todel::models::{InstanceInfo, Message};
 use tokio::time;
 
 /// The default rest url
@@ -62,7 +65,7 @@ impl HttpClient {
     }
 
     /// Fetch the info payload of an instance
-    pub async fn fetch_instance_info(&self) -> Error<Info> {
+    pub async fn fetch_instance_info(&self) -> Error<InstanceInfo> {
         Ok(self.client.get(&self.rest_url).send().await?.json().await?)
     }
 
@@ -116,5 +119,15 @@ impl HttpClient {
             content,
         )
         .await
+    }
+
+    /// Create a [`GatewayClient`] using the connected instance's instance info
+    /// pandemonium url if any.
+    pub async fn create_gateway(&self) -> Error<Option<GatewayClient>> {
+        let info = self.fetch_instance_info().await?;
+        match info.pandemonium_url {
+            Some(url) => Ok(Some(GatewayClient::new().gateway_url(url))),
+            None => Ok(None),
+        }
     }
 }
