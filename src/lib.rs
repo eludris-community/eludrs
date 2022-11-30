@@ -5,3 +5,7 @@ mod models;
 
 pub use gateway::{Events, GatewayClient, GATEWAY_URL};
 pub use http::{HttpClient, REST_URL};
+
+pub mod todel {
+    pub use todel::models::*;
+}
