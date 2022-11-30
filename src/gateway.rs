@@ -168,10 +168,10 @@ impl Stream for Events {
                 match rx.as_mut().unwrap().poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => match msg {
                         WSMessage::Text(msg) => {
-                            if let Ok(msg) = serde_json::from_str::<Payload>(&msg) {
-                                if let Payload::MessageCreate(msg) = msg {
-                                    break Poll::Ready(Some(msg));
-                                }
+                            if let Ok(Payload::MessageCreate(msg)) =
+                                serde_json::from_str::<Payload>(&msg)
+                            {
+                                break Poll::Ready(Some(msg));
                             }
                         }
                         WSMessage::Close(_) => {
