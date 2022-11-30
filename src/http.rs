@@ -8,7 +8,7 @@ use todel::models::{InstanceInfo, Message};
 use tokio::time;
 
 /// The default rest url
-pub const REST_URL: &str = "https://eludris.tooty.xyz";
+pub const REST_URL: &str = "https://eludris.tooty.xyz/next";
 
 /// Simple Http client
 #[derive(Debug)]
