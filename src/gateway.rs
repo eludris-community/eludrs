@@ -7,7 +7,7 @@ use std::{
 };
 
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
-use todel::models::Message;
+use todel::models::{Message, Payload};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
@@ -47,6 +47,7 @@ impl GatewayClient {
     pub fn new() -> GatewayClient {
         GatewayClient::default()
     }
+
     /// Change the url of the GatewayClient
     ///
     /// # Example:
@@ -89,7 +90,12 @@ impl Events {
         let (mut tx, rx) = socket.split();
         *ping = Some(tokio::spawn(async move {
             loop {
-                match tx.send(WSMessage::Ping(vec![])).await {
+                match tx
+                    .send(WSMessage::Text(
+                        serde_json::to_string(&Payload::Ping).unwrap(),
+                    ))
+                    .await
+                {
                     Ok(_) => time::sleep(Duration::from_secs(20)).await,
                     Err(err) => {
                         log::debug!("Encountered error while pinging {:?}", err);
@@ -119,7 +125,12 @@ impl Events {
                     let (mut tx, new_rx) = socket.split();
                     *ping = Some(tokio::spawn(async move {
                         loop {
-                            match tx.send(WSMessage::Ping(vec![])).await {
+                            match tx
+                                .send(WSMessage::Text(
+                                    serde_json::to_string(&Payload::Ping).unwrap(),
+                                ))
+                                .await
+                            {
                                 Ok(_) => time::sleep(Duration::from_secs(20)).await,
                                 Err(err) => {
                                     log::debug!("Encountered error while pinging {:?}", err);
@@ -157,8 +168,10 @@ impl Stream for Events {
                 match rx.as_mut().unwrap().poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => match msg {
                         WSMessage::Text(msg) => {
-                            if let Ok(msg) = serde_json::from_str(&msg) {
-                                break Poll::Ready(Some(msg));
+                            if let Ok(msg) = serde_json::from_str::<Payload>(&msg) {
+                                if let Payload::MessageCreate(msg) = msg {
+                                    break Poll::Ready(Some(msg));
+                                }
                             }
                         }
                         WSMessage::Close(_) => {
