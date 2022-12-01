@@ -7,7 +7,7 @@ A simple asynchronous wrapper for the Eludris API
 Just run the following command:
 
 ```sh
-cargo add --git https://github.com/enokiun/eludrs
+cargo add --git https://github.com/eludris-community/eludrs
 ```
 
 > **Note**
