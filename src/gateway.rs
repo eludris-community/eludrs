@@ -13,10 +13,7 @@ use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
 };
 
-use crate::models::Error;
-
-/// The default gateway url
-pub const GATEWAY_URL: &str = "wss://eludris.tooty.xyz/next/ws/";
+use crate::{models::Error, GATEWAY_URL};
 
 type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 

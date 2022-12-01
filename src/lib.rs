@@ -3,10 +3,16 @@ mod gateway;
 mod http;
 mod models;
 
-pub use gateway::{Events, GatewayClient, GATEWAY_URL};
-pub use http::{HttpClient, REST_URL};
+pub use gateway::{Events, GatewayClient};
+pub use http::HttpClient;
 
 /// All the todel models re-exported
 pub mod todel {
     pub use todel::models::*;
 }
+
+/// The default rest url
+pub const REST_URL: &str = "https://eludris.tooty.xyz";
+
+/// The default gateway url
+pub const GATEWAY_URL: &str = "wss://eludris.tooty.xyz/ws/";
