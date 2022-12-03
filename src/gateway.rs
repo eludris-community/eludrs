@@ -147,7 +147,9 @@ impl Events {
                         wait
                     );
                     thread::sleep(Duration::from_secs(wait));
-                    wait *= 2;
+                    if wait < 64 {
+                        wait *= 2;
+                    }
                 }
             }
         }
