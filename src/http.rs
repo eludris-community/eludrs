@@ -142,10 +142,8 @@ impl HttpClient {
 
     /// Create a [`GatewayClient`] using the connected instance's instance info
     /// pandemonium url if any.
-    pub async fn create_gateway(&mut self) -> Error<Option<GatewayClient>> {
+    pub async fn create_gateway(&mut self) -> Error<GatewayClient> {
         let info = self.get_instance_info().await?;
-        Ok(Some(
-            GatewayClient::new().gateway_url(info.pandemonium_url.clone()),
-        ))
+        Ok(GatewayClient::new().gateway_url(info.pandemonium_url.clone()))
     }
 }
