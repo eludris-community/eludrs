@@ -19,14 +19,14 @@ cargo add --git https://github.com/eludris-community/eludrs
 While an API wrapper has many uses, here's an example of what most people will
 end up using this for, making Bots:
 
-```rs
-use eludrs::{GatewayClient, HttpClient};
+```rust
+use eludrs::HttpClient;
 use futures::stream::StreamExt;
 
 #[tokio::main]
 async fn main() {
-    let http = HttpClient::new().name("Uwuki".to_string());
-    let gateway = GatewayClient::new();
+    let mut http = HttpClient::new().name("Uwuki".to_string());
+    let gateway = http.create_gateway.await?;
     let mut events = gateway.get_events().await.unwrap();
 
     while let Some(msg) = events.next().await {
