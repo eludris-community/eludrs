@@ -12,6 +12,6 @@ log = "0.4.17"
 reqwest = { version = "0.11.13", features = ["json"] }
 serde = { version = "1.0.147", features = ["derive"] }
 serde_json = "1.0.87"
-todel = { git = "https://github.com/eludris/todel" }
+todel = { git = "https://github.com/eludris/eludris", version = "0.3.1" }
 tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros", "time"] }
 tokio-tungstenite = { version = "0.17.2", features = ["native-tls"] }
