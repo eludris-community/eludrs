@@ -29,7 +29,7 @@ impl Default for HttpClient {
 
 impl HttpClient {
     /// Create a new HttpClient
-    pub fn new() -> HttpClient {
+    pub fn new() -> Self {
         HttpClient::default()
     }
 
@@ -43,7 +43,7 @@ impl HttpClient {
     ///
     /// assert_eq!(client.user_name, Some("Uwuki".to_string()))
     /// ```
-    pub fn name(mut self, name: String) -> HttpClient {
+    pub fn name(mut self, name: String) -> Self {
         self.user_name = Some(name);
         self
     }
@@ -58,7 +58,7 @@ impl HttpClient {
     ///
     /// assert_eq!(client.rest_url, "http://0.0.0.0:7159".to_string())
     /// ```
-    pub fn rest_url(mut self, url: String) -> HttpClient {
+    pub fn rest_url(mut self, url: String) -> Self {
         self.rest_url = url;
         self
     }
@@ -80,7 +80,7 @@ impl HttpClient {
 
     /// Send a message supplying both an author name and content
     pub async fn send_message<T: Display, C: Display>(
-        &mut self,
+        &self,
         author: T,
         content: C,
     ) -> Error<Message> {
@@ -101,7 +101,7 @@ impl HttpClient {
                     break Ok(msg);
                 }
                 Ok(MessageResponse::Error(err)) => match err.data {
-                    Some(ErrorData::RatelimitedError(data)) => {
+                    Some(ErrorData::RateLimitedError(data)) => {
                         log::info!(
                             "Client got ratelimited at /messages, retrying in {}ms",
                             data.retry_after
@@ -129,7 +129,7 @@ impl HttpClient {
     /// # Panics
     ///
     /// This function can panic if there is no name set by the [`HttpClient::name`] function
-    pub async fn send<T: Display>(&mut self, content: T) -> Error<Message> {
+    pub async fn send<T: Display>(&self, content: T) -> Error<Message> {
         self.send_message(
             &self
                 .user_name
