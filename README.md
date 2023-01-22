@@ -7,12 +7,8 @@ A simple asynchronous wrapper for the Eludris API
 Just run the following command:
 
 ```sh
-cargo add --git https://github.com/eludris-community/eludrs
+cargo add --git eludrs
 ```
-
-> **Note**
-> You may be wondering why this is not on crates.io, that's because Eludris is
-> still in early development stages, expect a release when Eludris is more stable.
 
 ## Example
 
