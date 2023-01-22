@@ -8,7 +8,7 @@ homepage = "https://github.com/eludris-community/eludrs"
 repository = "https://github.com/eludris-community/eludrs"
 readme = "README.md"
 categories = [
-	"api-binding",
+	"api-bindings",
 	"asynchronous",
 	"web-programming",
 	"web-programming::http-client",
