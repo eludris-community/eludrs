@@ -18,7 +18,7 @@ use crate::{models::Error, GATEWAY_URL};
 type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
 /// A Stream of Pandemonium events
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Events {
     gateway_url: String,
     rx: Arc<Mutex<Option<WsReceiver>>>,
@@ -26,7 +26,7 @@ pub struct Events {
 }
 
 /// Simple gateway client
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GatewayClient {
     pub gateway_url: String,
 }

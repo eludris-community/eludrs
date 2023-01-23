@@ -8,7 +8,7 @@ use todel::models::{ErrorData, InstanceInfo, Message};
 use tokio::time;
 
 /// Simple Http client
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpClient {
     client: Client,
     instance_info: Option<InstanceInfo>,
