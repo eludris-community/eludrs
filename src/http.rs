@@ -109,13 +109,14 @@ impl HttpClient {
                         time::sleep(Duration::from_millis(data.retry_after)).await;
                     }
                     Some(ErrorData::ValidationError(data)) => {
-                        log::warn!(
+                        Err(anyhow::anyhow!(
                             "Ran into a validation error with field {}: {}",
                             data.field_name,
                             data.error
-                        );
+                        ))?;
                     }
-                    _ => {}
+                    Some(err) => Err(anyhow::anyhow!("Could not send message: {:?}", err))?,
+                    _ => Err(anyhow::anyhow!("Could not send message"))?,
                 },
                 Err(err) => {
                     break Err(err)?;
@@ -133,7 +134,7 @@ impl HttpClient {
         self.send_message(
             &self
                 .user_name
-                .clone()
+                .as_ref()
                 .expect("You have to specifiy a name to run this function"),
             content,
         )
