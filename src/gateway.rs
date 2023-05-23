@@ -6,14 +6,15 @@ use std::{
     time::Duration,
 };
 
+use anyhow::{bail, Result};
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
-use todel::models::{Message, Payload};
+use todel::models::{ClientPayload, Message, ServerPayload};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
 };
 
-use crate::{models::Error, GATEWAY_URL};
+use crate::GATEWAY_URL;
 
 type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -61,7 +62,7 @@ impl GatewayClient {
     }
 
     /// Start a connection to the Pandemonium and return [`Events`]
-    pub async fn get_events(&self) -> Error<Events> {
+    pub async fn get_events(&self) -> Result<Events> {
         let mut events = Events::new(self.gateway_url.to_string());
         events.connect().await?;
         Ok(events)
@@ -77,30 +78,45 @@ impl Events {
         }
     }
 
-    async fn connect(&mut self) -> Error<()> {
+    async fn connect(&mut self) -> Result<()> {
         log::debug!("Events connecting");
         let mut ping = self.ping.lock().await;
         if ping.is_some() {
             ping.as_mut().unwrap().abort();
         }
         let (socket, _) = connect_async(&self.gateway_url).await?;
-        let (mut tx, rx) = socket.split();
-        *ping = Some(tokio::spawn(async move {
-            loop {
-                match tx
-                    .send(WSMessage::Text(
-                        serde_json::to_string(&Payload::Ping).unwrap(),
-                    ))
-                    .await
+        let (mut tx, mut rx) = socket.split();
+        loop {
+            if let Some(Ok(WSMessage::Text(msg))) = rx.next().await {
+                if let Ok(ServerPayload::Hello {
+                    heartbeat_interval, ..
+                }) = serde_json::from_str(&msg)
                 {
-                    Ok(_) => time::sleep(Duration::from_secs(20)).await,
-                    Err(err) => {
-                        log::debug!("Encountered error while pinging {:?}", err);
-                        break;
-                    }
+                    *ping = Some(tokio::spawn(async move {
+                        loop {
+                            match tx
+                                .send(WSMessage::Text(
+                                    serde_json::to_string(&ClientPayload::Ping).unwrap(),
+                                ))
+                                .await
+                            {
+                                Ok(_) => {
+                                    time::sleep(Duration::from_millis(heartbeat_interval)).await
+                                }
+                                Err(err) => {
+                                    log::debug!("Encountered error while pinging {:?}", err);
+                                    break;
+                                }
+                            }
+                        }
+                    }));
+                    break;
                 }
+            } else {
+                bail!("Could not find HELLO payload");
             }
-        }));
+        }
+
         *self.rx.lock().await = Some(rx);
         Ok(())
     }
@@ -124,7 +140,7 @@ impl Events {
                         loop {
                             match tx
                                 .send(WSMessage::Text(
-                                    serde_json::to_string(&Payload::Ping).unwrap(),
+                                    serde_json::to_string(&ClientPayload::Ping).unwrap(),
                                 ))
                                 .await
                             {
@@ -167,8 +183,8 @@ impl Stream for Events {
                 match rx.as_mut().unwrap().poll_next_unpin(cx) {
                     Poll::Ready(Some(Ok(msg))) => match msg {
                         WSMessage::Text(msg) => {
-                            if let Ok(Payload::MessageCreate(msg)) =
-                                serde_json::from_str::<Payload>(&msg)
+                            if let Ok(ServerPayload::MessageCreate(msg)) =
+                                serde_json::from_str(&msg)
                             {
                                 break Poll::Ready(Some(msg));
                             }

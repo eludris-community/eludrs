@@ -1,10 +1,8 @@
-use crate::{
-    models::{Error, MessageResponse},
-    GatewayClient, REST_URL,
-};
+use crate::{models::MessageResponse, GatewayClient, REST_URL};
+use anyhow::Result;
 use reqwest::Client;
 use std::{fmt::Display, time::Duration};
-use todel::models::{ErrorData, InstanceInfo, Message};
+use todel::models::{ErrorResponse, InstanceInfo, Message};
 use tokio::time;
 
 /// Simple Http client
@@ -64,12 +62,12 @@ impl HttpClient {
     }
 
     /// Fetch the info payload of an instance
-    pub async fn fetch_instance_info(&self) -> Error<InstanceInfo> {
+    pub async fn fetch_instance_info(&self) -> Result<InstanceInfo> {
         Ok(self.client.get(&self.rest_url).send().await?.json().await?)
     }
 
     /// Try to get the client's internal InstanceInfo or fetch it if it does not already exist
-    pub async fn get_instance_info(&mut self) -> Error<&InstanceInfo> {
+    pub async fn get_instance_info(&mut self) -> Result<&InstanceInfo> {
         if self.instance_info.is_some() {
             Ok(self.instance_info.as_ref().unwrap())
         } else {
@@ -83,7 +81,7 @@ impl HttpClient {
         &self,
         author: T,
         content: C,
-    ) -> Error<Message> {
+    ) -> Result<Message> {
         loop {
             match self
                 .client
@@ -100,23 +98,24 @@ impl HttpClient {
                 Ok(MessageResponse::Message(msg)) => {
                     break Ok(msg);
                 }
-                Ok(MessageResponse::Error(err)) => match err.data {
-                    Some(ErrorData::RateLimitedError(data)) => {
+                Ok(MessageResponse::Error(err)) => match err {
+                    ErrorResponse::RateLimited { try_after, .. } => {
                         log::info!(
                             "Client got ratelimited at /messages, retrying in {}ms",
-                            data.retry_after
+                            try_after
                         );
-                        time::sleep(Duration::from_millis(data.retry_after)).await;
+                        time::sleep(Duration::from_millis(try_after)).await;
                     }
-                    Some(ErrorData::ValidationError(data)) => {
+                    ErrorResponse::Validation {
+                        value_name, info, ..
+                    } => {
                         Err(anyhow::anyhow!(
                             "Ran into a validation error with field {}: {}",
-                            data.field_name,
-                            data.error
+                            value_name,
+                            info,
                         ))?;
                     }
-                    Some(err) => Err(anyhow::anyhow!("Could not send message: {:?}", err))?,
-                    _ => Err(anyhow::anyhow!("Could not send message"))?,
+                    err => Err(anyhow::anyhow!("Could not send message: {:?}", err))?,
                 },
                 Err(err) => {
                     break Err(err)?;
@@ -130,7 +129,7 @@ impl HttpClient {
     /// # Panics
     ///
     /// This function can panic if there is no name set by the [`HttpClient::name`] function
-    pub async fn send<T: Display>(&self, content: T) -> Error<Message> {
+    pub async fn send<T: Display>(&self, content: T) -> Result<Message> {
         self.send_message(
             &self
                 .user_name
@@ -143,7 +142,7 @@ impl HttpClient {
 
     /// Create a [`GatewayClient`] using the connected instance's instance info
     /// pandemonium url if any.
-    pub async fn create_gateway(&mut self) -> Error<GatewayClient> {
+    pub async fn create_gateway(&mut self) -> Result<GatewayClient> {
         let info = self.get_instance_info().await?;
         Ok(GatewayClient::new().gateway_url(info.pandemonium_url.clone()))
     }

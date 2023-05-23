@@ -1,6 +1,6 @@
 [package]
 name = "eludrs"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "MIT"
 description = "A simple API wrapper for Eludris built on Tokio"
@@ -25,6 +25,6 @@ log = "0.4.17"
 reqwest = { version = "0.11.13", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0.147", features = ["derive"] }
 serde_json = "1.0.87"
-todel = { version = "0.3.2", git = "https://github.com/eludris/eludris" }
+todel = { version = "0.3.3", git = "https://github.com/eludris/eludris" }
 tokio = { version = "1.21.2", features = ["rt-multi-thread", "macros", "time"] }
 tokio-tungstenite = { version = "0.17.2", features = ["rustls-tls-webpki-roots"] }
