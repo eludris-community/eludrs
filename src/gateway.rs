@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{bail, Result};
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use todel::models::{ClientPayload, Message, ServerPayload};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
@@ -24,6 +25,7 @@ pub struct Events {
     gateway_url: String,
     rx: Arc<Mutex<Option<WsReceiver>>>,
     ping: Arc<Mutex<Option<JoinHandle<()>>>>,
+    rng: Arc<Mutex<StdRng>>,
 }
 
 /// Simple gateway client
@@ -75,6 +77,7 @@ impl Events {
             gateway_url,
             rx: Arc::new(Mutex::new(None)),
             ping: Arc::new(Mutex::new(None)),
+            rng: Arc::new(Mutex::new(StdRng::from_entropy())),
         }
     }
 
@@ -92,6 +95,10 @@ impl Events {
                     heartbeat_interval, ..
                 }) = serde_json::from_str(&msg)
                 {
+                    time::sleep(Duration::from_millis(
+                        self.rng.lock().await.gen_range(0..heartbeat_interval),
+                    ))
+                    .await;
                     *ping = Some(tokio::spawn(async move {
                         loop {
                             match tx
@@ -126,32 +133,60 @@ impl Events {
         gateway_url: String,
         rx: Arc<Mutex<Option<WsReceiver>>>,
         ping: Arc<Mutex<Option<JoinHandle<()>>>>,
+        rng: Arc<Mutex<StdRng>>,
     ) {
         let mut wait = 1;
-        loop {
-            let mut ping = ping.lock().await;
-            if ping.is_some() {
-                ping.as_mut().unwrap().abort();
-            }
+        let mut ping = ping.lock().await;
+        if ping.is_some() {
+            ping.as_mut().unwrap().abort();
+        }
+        'outer: loop {
             match connect_async(&gateway_url).await {
                 Ok((socket, _)) => {
-                    let (mut tx, new_rx) = socket.split();
-                    *ping = Some(tokio::spawn(async move {
-                        loop {
-                            match tx
-                                .send(WSMessage::Text(
-                                    serde_json::to_string(&ClientPayload::Ping).unwrap(),
-                                ))
-                                .await
+                    let (mut tx, mut new_rx) = socket.split();
+                    loop {
+                        if let Some(Ok(WSMessage::Text(msg))) = new_rx.next().await {
+                            if let Ok(ServerPayload::Hello {
+                                heartbeat_interval, ..
+                            }) = serde_json::from_str(&msg)
                             {
-                                Ok(_) => time::sleep(Duration::from_secs(20)).await,
-                                Err(err) => {
-                                    log::debug!("Encountered error while pinging {:?}", err);
-                                    break;
-                                }
+                                time::sleep(Duration::from_millis(
+                                    rng.lock().await.gen_range(0..heartbeat_interval),
+                                ))
+                                .await;
+                                *ping = Some(tokio::spawn(async move {
+                                    loop {
+                                        match tx
+                                            .send(WSMessage::Text(
+                                                serde_json::to_string(&ClientPayload::Ping)
+                                                    .unwrap(),
+                                            ))
+                                            .await
+                                        {
+                                            Ok(_) => {
+                                                time::sleep(Duration::from_millis(
+                                                    heartbeat_interval,
+                                                ))
+                                                .await
+                                            }
+                                            Err(err) => {
+                                                log::debug!(
+                                                    "Encountered error while pinging {:?}",
+                                                    err
+                                                );
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }));
+                                break;
                             }
+                        } else {
+                            log::error!("Could not find HELLO payload");
+                            continue 'outer;
                         }
-                    }));
+                    }
+
                     *rx.lock().await = Some(new_rx);
                     log::debug!("Reconnected to websocket");
                     break;
@@ -196,6 +231,7 @@ impl Stream for Events {
                                 self.gateway_url.clone(),
                                 Arc::clone(&self.rx),
                                 Arc::clone(&self.ping),
+                                Arc::clone(&self.rng),
                             ));
                             return Poll::Pending;
                         }
@@ -209,6 +245,7 @@ impl Stream for Events {
                             self.gateway_url.clone(),
                             Arc::clone(&self.rx),
                             Arc::clone(&self.ping),
+                            Arc::clone(&self.rng),
                         ));
                         return Poll::Pending;
                     }
