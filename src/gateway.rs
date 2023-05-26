@@ -150,11 +150,11 @@ impl Events {
                                 heartbeat_interval, ..
                             }) = serde_json::from_str(&msg)
                             {
-                                time::sleep(Duration::from_millis(
-                                    rng.lock().await.gen_range(0..heartbeat_interval),
-                                ))
-                                .await;
                                 *ping = Some(tokio::spawn(async move {
+                                    time::sleep(Duration::from_millis(
+                                        rng.lock().await.gen_range(0..heartbeat_interval),
+                                    ))
+                                    .await;
                                     loop {
                                         match tx
                                             .send(WSMessage::Text(
