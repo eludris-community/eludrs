@@ -2,7 +2,7 @@ use crate::{models::MessageResponse, GatewayClient, REST_URL};
 use anyhow::Result;
 use reqwest::Client;
 use std::{fmt::Display, time::Duration};
-use todel::models::{ErrorResponse, InstanceInfo, Message};
+use todel::{ErrorResponse, InstanceInfo, Message, MessageCreate};
 use tokio::time;
 
 /// Simple Http client
@@ -10,40 +10,19 @@ use tokio::time;
 pub struct HttpClient {
     client: Client,
     instance_info: Option<InstanceInfo>,
+    token: String,
     pub rest_url: String,
-    pub user_name: Option<String>,
-}
-
-impl Default for HttpClient {
-    fn default() -> Self {
-        HttpClient {
-            client: Client::new(),
-            instance_info: None,
-            rest_url: REST_URL.to_string(),
-            user_name: None,
-        }
-    }
 }
 
 impl HttpClient {
     /// Create a new HttpClient
-    pub fn new() -> Self {
-        HttpClient::default()
-    }
-
-    /// Change the [`HttpClient::user_name`] of the HttpClient
-    ///
-    /// # Example:
-    /// ```rust
-    /// use eludrs::HttpClient;
-    ///
-    /// let client = HttpClient::new().name("Uwuki".to_string());
-    ///
-    /// assert_eq!(client.user_name, Some("Uwuki".to_string()))
-    /// ```
-    pub fn name(mut self, name: String) -> Self {
-        self.user_name = Some(name);
-        self
+    pub fn new(token: &str) -> Self {
+        HttpClient {
+            client: Client::new(),
+            instance_info: None,
+            token: token.to_string(),
+            rest_url: REST_URL.to_string(),
+        }
     }
 
     /// Change the url of the HttpClient
@@ -76,19 +55,16 @@ impl HttpClient {
         }
     }
 
-    /// Send a message supplying both an author name and content
-    pub async fn send_message<T: Display, C: Display>(
-        &self,
-        author: T,
-        content: C,
-    ) -> Result<Message> {
+    /// Send a message
+    pub async fn send_message<C: Display>(&self, content: C) -> Result<Message> {
         loop {
             match self
                 .client
                 .post(format!("{}/messages", self.rest_url))
-                .json(&Message {
-                    author: author.to_string(),
+                .header("Authorization", &self.token)
+                .json(&MessageCreate {
                     content: content.to_string(),
+                    disguise: None,
                 })
                 .send()
                 .await?
@@ -99,12 +75,12 @@ impl HttpClient {
                     break Ok(msg);
                 }
                 Ok(MessageResponse::Error(err)) => match err {
-                    ErrorResponse::RateLimited { try_after, .. } => {
+                    ErrorResponse::RateLimited { retry_after, .. } => {
                         log::info!(
                             "Client got ratelimited at /messages, retrying in {}ms",
-                            try_after
+                            retry_after
                         );
-                        time::sleep(Duration::from_millis(try_after)).await;
+                        time::sleep(Duration::from_millis(retry_after)).await;
                     }
                     ErrorResponse::Validation {
                         value_name, info, ..
@@ -124,26 +100,11 @@ impl HttpClient {
         }
     }
 
-    /// Send a message using the client's [`HttpClient::user_name`]
-    ///
-    /// # Panics
-    ///
-    /// This function can panic if there is no name set by the [`HttpClient::name`] function
-    pub async fn send<T: Display>(&self, content: T) -> Result<Message> {
-        self.send_message(
-            &self
-                .user_name
-                .as_ref()
-                .expect("You have to specifiy a name to run this function"),
-            content,
-        )
-        .await
-    }
-
     /// Create a [`GatewayClient`] using the connected instance's instance info
     /// pandemonium url if any.
     pub async fn create_gateway(&mut self) -> Result<GatewayClient> {
         let info = self.get_instance_info().await?;
-        Ok(GatewayClient::new().gateway_url(info.pandemonium_url.clone()))
+        let gateway_url = info.pandemonium_url.clone();
+        Ok(GatewayClient::new(&self.token).gateway_url(gateway_url))
     }
 }

@@ -20,18 +20,20 @@
 //! end up using this for, making Bots:
 //!
 //! ```ignore
-//! # use eludrs::HttpClient;
+//! # use eludrs::{HttpClient, models::Event};
 //! # use futures::stream::StreamExt;
 //!
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-//! let mut http = HttpClient::new().name("Uwuki".to_string());
+//! let mut http = HttpClient::new("YOUR TOKEN HERE");
 //! let gateway = http.create_gateway().await?; // uses the InstanceInfo of the instance
 //! let mut events = gateway.get_events().await.unwrap();
 //!
-//! while let Some(msg) = events.next().await {
-//!     if msg.content == "!ping" {
-//!         http.send("Pong").await.unwrap();
+//! while let Some(event) = events.next().await {
+//!     if let Event::Message(msg) = event {
+//!         if msg.content == "!ping" {
+//!             http.send("Pong").await.unwrap();
+//!         }
 //!     }
 //! }
 //! #  Ok(())
@@ -48,14 +50,14 @@
 //! ```
 mod gateway;
 mod http;
-mod models;
+pub mod models;
 
 pub use gateway::{Events, GatewayClient};
 pub use http::HttpClient;
 
 /// All the todel models re-exported
 pub mod todel {
-    pub use todel::models::*;
+    pub use todel::*;
 }
 
 /// The default rest url
