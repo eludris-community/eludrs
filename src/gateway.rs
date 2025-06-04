@@ -10,7 +10,7 @@ use std::{
 use anyhow::{bail, Result};
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use todel::{ClientPayload, ServerPayload, User};
+use todel::models::{ClientPayload, ServerPayload, Sphere, User};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
@@ -25,6 +25,7 @@ type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub struct GatewayData {
     user: Option<User>,
     users: HashMap<u64, User>,
+    spheres: HashMap<u64, Sphere>,
 }
 
 /// A Stream of Pandemonium events
@@ -252,25 +253,18 @@ impl Stream for Events {
                         WSMessage::Text(msg) => {
                             if let Ok(payload) = serde_json::from_str(&msg) {
                                 match payload {
-                                    ServerPayload::Pong
-                                    | ServerPayload::RateLimit { .. }
-                                    | ServerPayload::Hello { .. } => {}
-                                    ServerPayload::Authenticated { user, users } => {
+                                    ServerPayload::Authenticated { user, spheres } => {
                                         data.user = Some(user);
-                                        users.into_iter().for_each(|u| {
-                                            data.users.insert(u.id, u);
+                                        spheres.into_iter().for_each(|s| {
+                                            s.members.clone().into_iter().for_each(|u| {
+                                                data.users.insert(u.user.id, u.user);
+                                            });
+                                            data.spheres.insert(s.id, s);
                                         });
                                         break Poll::Ready(Some(Event::Authenticated));
                                     }
                                     ServerPayload::MessageCreate(msg) => {
                                         break Poll::Ready(Some(Event::Message(msg)));
-                                    }
-                                    ServerPayload::UserUpdate(update) => {
-                                        let user = data.users.insert(update.id, update.clone());
-                                        break Poll::Ready(Some(Event::UserUpdate {
-                                            old_user: user,
-                                            user: update,
-                                        }));
                                     }
                                     ServerPayload::PresenceUpdate { status, user_id } => {
                                         let user = data.users.get(&user_id);
@@ -280,6 +274,7 @@ impl Stream for Events {
                                             status,
                                         }));
                                     }
+                                    _ => {}
                                 }
                             }
                         }

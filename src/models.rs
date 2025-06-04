@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use todel::{ErrorResponse, Message, Status, User};
+pub use todel::models::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -15,8 +15,6 @@ pub enum Event {
     Authenticated,
     /// A message that has just been sent over the gateway
     Message(Message),
-    /// The old and new data after a user has been updated
-    UserUpdate { old_user: Option<User>, user: User },
     /// The old and new data after a user's status has been updated
     PresenceUpdate {
         old_status: Option<Status>,

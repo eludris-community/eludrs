@@ -2,7 +2,7 @@ use crate::{models::MessageResponse, GatewayClient, REST_URL};
 use anyhow::Result;
 use reqwest::Client;
 use std::{fmt::Display, time::Duration};
-use todel::{ErrorResponse, InstanceInfo, Message, MessageCreate};
+use todel::models::{ErrorResponse, InstanceInfo, Message, MessageCreate};
 use tokio::time;
 
 /// Simple Http client
@@ -56,15 +56,21 @@ impl HttpClient {
     }
 
     /// Send a message
-    pub async fn send_message<C: Display>(&self, content: C) -> Result<Message> {
+    pub async fn send_message<C: Display>(&self, channel_id: u64, content: C) -> Result<Message> {
         loop {
             match self
                 .client
-                .post(format!("{}/messages", self.rest_url))
+                .post(format!(
+                    "{}/channels/{}/messages",
+                    self.rest_url, channel_id
+                ))
                 .header("Authorization", &self.token)
                 .json(&MessageCreate {
-                    content: content.to_string(),
+                    content: Some(content.to_string()),
                     disguise: None,
+                    attachments: vec![],
+                    embeds: vec![],
+                    reference: None,
                 })
                 .send()
                 .await?
