@@ -6,7 +6,7 @@ use serde_json::{json, Map};
 use std::{fmt::Display, str::FromStr, time::Duration};
 use todel::models::{
     Category, ErrorResponse, InstanceInfo, Message, MessageCreate, MessageDisguise,
-    PasswordDeleteCredentials, ResetPassword, Session, SessionCreate, SessionCreated, Sphere,
+    PasswordDeleteCredentials, PasswordReset, Session, SessionCreate, SessionCreated, Sphere,
     SphereChannel, SphereType, UpdateUser, UpdateUserProfile, User, UserCreate,
 };
 use tokio::time;
@@ -414,11 +414,11 @@ impl HttpClient {
     /// Reset your password.
     pub async fn reset_password(&self, code: u32, email: String, password: String) -> Result<()> {
         match self
-            .request::<(), (), ResetPassword>(
+            .request::<(), (), PasswordReset>(
                 "POST",
                 "/users/reset-password",
                 None,
-                Some(ResetPassword {
+                Some(PasswordReset {
                     code,
                     email,
                     password,
