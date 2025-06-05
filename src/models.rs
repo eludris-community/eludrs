@@ -29,7 +29,7 @@ pub enum Event {
     /// A category has been created
     CategoryCreate { category: Category, sphere_id: u64 },
     /// A category has been edited
-    CategoryEdit {
+    CategoryUpdate {
         data: CategoryEdit,
         category_id: u64,
         sphere_id: u64,
@@ -42,7 +42,7 @@ pub enum Event {
         sphere_id: u64,
     },
     /// A channel has been edited
-    SphereChannelEdit {
+    SphereChannelUpdate {
         data: SphereChannelEdit,
         channel_id: u64,
         sphere_id: u64,

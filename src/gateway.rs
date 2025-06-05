@@ -290,12 +290,12 @@ impl Stream for Events {
                                             sphere_id,
                                         }));
                                     }
-                                    ServerPayload::CategoryEdit {
+                                    ServerPayload::CategoryUpdate {
                                         data,
                                         category_id,
                                         sphere_id,
                                     } => {
-                                        break Poll::Ready(Some(Event::CategoryEdit {
+                                        break Poll::Ready(Some(Event::CategoryUpdate {
                                             data,
                                             category_id,
                                             sphere_id,
@@ -316,12 +316,12 @@ impl Stream for Events {
                                             sphere_id,
                                         }));
                                     }
-                                    ServerPayload::SphereChannelEdit {
+                                    ServerPayload::SphereChannelUpdate {
                                         data,
                                         channel_id,
                                         sphere_id,
                                     } => {
-                                        break Poll::Ready(Some(Event::SphereChannelEdit {
+                                        break Poll::Ready(Some(Event::SphereChannelUpdate {
                                             data,
                                             channel_id,
                                             sphere_id,
