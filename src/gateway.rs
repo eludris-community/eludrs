@@ -24,6 +24,7 @@ type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 #[derive(Default, Debug, Clone)]
 pub struct GatewayData {
     user: Option<User>,
+    users: HashMap<u64, User>,
     spheres: HashMap<u64, Sphere>,
 }
 
@@ -255,8 +256,11 @@ impl Stream for Events {
                                     | ServerPayload::Hello { .. } => {}
                                     ServerPayload::Authenticated { user, spheres } => {
                                         data.user = Some(user);
-                                        spheres.into_iter().for_each(|s| {
-                                            data.spheres.insert(s.id, s);
+                                        spheres.into_iter().for_each(|sphere| {
+                                            data.spheres.insert(sphere.id, sphere);
+                                            for member in sphere.members {
+                                                data.users.insert(member.user.id, member.user);
+                                            }
                                         });
                                         break Poll::Ready(Some(Event::Authenticated));
                                     }
@@ -264,18 +268,24 @@ impl Stream for Events {
                                         break Poll::Ready(Some(Event::Message(msg)));
                                     }
                                     ServerPayload::UserUpdate(user) => {
+                                        data.users.insert(user.id, user.clone());
                                         break Poll::Ready(Some(Event::UserUpdate(user)));
                                     }
                                     ServerPayload::PresenceUpdate { status, user_id } => {
+                                        if let Some(user) = data.users.get_mut(&user_id) {
+                                            user.status = status.clone();
+                                        }
                                         break Poll::Ready(Some(Event::PresenceUpdate {
                                             user_id,
                                             status,
                                         }));
                                     }
                                     ServerPayload::SphereJoin(sphere) => {
+                                        data.spheres.insert(sphere.id, sphere.clone());
                                         break Poll::Ready(Some(Event::SphereJoin(sphere)));
                                     }
                                     ServerPayload::SphereMemberJoin { user, sphere_id } => {
+                                        data.users.insert(user.id, user.clone());
                                         break Poll::Ready(Some(Event::SphereMemberJoin {
                                             user,
                                             sphere_id,
