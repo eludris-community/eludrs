@@ -51,7 +51,7 @@ pub enum Event {
     SphereChannelDelete { channel_id: u64, sphere_id: u64 },
 }
 
-/// Copy of [`todel::models::Sphere`], but without the members field.
+/// Copy of [`todel::models::Sphere`], but with a custom member model.
 /// This flattens the cache to be more efficient to update.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CachedSphere {
