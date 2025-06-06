@@ -10,13 +10,16 @@ use std::{
 use anyhow::{bail, Result};
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use todel::models::{ClientPayload, ServerPayload, Sphere, User};
+use todel::models::{ClientPayload, ServerPayload, User};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
 };
 
-use crate::{models::Event, GATEWAY_URL};
+use crate::{
+    models::{CachedMember, CachedSphere, Event},
+    GATEWAY_URL,
+};
 
 type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -25,7 +28,7 @@ type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub struct GatewayData {
     user: Option<User>,
     users: HashMap<u64, User>,
-    spheres: HashMap<u64, Sphere>,
+    spheres: HashMap<u64, CachedSphere>,
 }
 
 /// A Stream of Pandemonium events
@@ -257,10 +260,11 @@ impl Stream for Events {
                                     ServerPayload::Authenticated { user, spheres } => {
                                         data.user = Some(user);
                                         spheres.into_iter().for_each(|sphere| {
-                                            data.spheres.insert(sphere.id, sphere);
+                                            let cached_sphere: CachedSphere = sphere.clone().into();
                                             for member in sphere.members {
                                                 data.users.insert(member.user.id, member.user);
                                             }
+                                            data.spheres.insert(cached_sphere.id, cached_sphere);
                                         });
                                         break Poll::Ready(Some(Event::Authenticated));
                                     }
@@ -281,11 +285,27 @@ impl Stream for Events {
                                         }));
                                     }
                                     ServerPayload::SphereJoin(sphere) => {
-                                        data.spheres.insert(sphere.id, sphere.clone());
-                                        break Poll::Ready(Some(Event::SphereJoin(sphere)));
+                                        let cached_sphere: CachedSphere = sphere.into();
+                                        data.spheres
+                                            .insert(cached_sphere.id, cached_sphere.clone());
+                                        break Poll::Ready(Some(Event::SphereJoin(cached_sphere)));
                                     }
                                     ServerPayload::SphereMemberJoin { user, sphere_id } => {
                                         data.users.insert(user.id, user.clone());
+                                        if let Some(sphere) = data.spheres.get_mut(&sphere_id) {
+                                            let member = CachedMember {
+                                                user_id: user.id,
+                                                sphere_id,
+                                                nickname: None,
+                                                sphere_avatar: None,
+                                                sphere_banner: None,
+                                                sphere_bio: None,
+                                                sphere_status: None,
+                                            };
+                                            sphere.members.push(member);
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
                                         break Poll::Ready(Some(Event::SphereMemberJoin {
                                             user,
                                             sphere_id,
@@ -346,6 +366,7 @@ impl Stream for Events {
                                             sphere_id,
                                         }));
                                     }
+                                    _ => todo!(),
                                 }
                             }
                         }
