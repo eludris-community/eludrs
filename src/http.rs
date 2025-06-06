@@ -7,7 +7,7 @@ use std::{fmt::Display, str::FromStr, time::Duration};
 use todel::models::{
     Category, ErrorResponse, InstanceInfo, Message, MessageCreate, MessageDisguise,
     PasswordDeleteCredentials, PasswordReset, Session, SessionCreate, SessionCreated, Sphere,
-    SphereChannel, SphereType, UpdateUser, UpdateUserProfile, User, UserCreate,
+    SphereChannel, SphereType, User, UserCreate, UserEdit, UserProfileEdit,
 };
 use tokio::time;
 
@@ -317,9 +317,9 @@ impl HttpClient {
     }
 
     /// Update the current user.
-    pub async fn update_user(&self, update: UpdateUser) -> Result<User> {
+    pub async fn update_user(&self, update: UserEdit) -> Result<User> {
         match self
-            .request::<User, (), UpdateUser>("PATCH", "users", None, Some(update))
+            .request::<User, (), UserEdit>("PATCH", "users", None, Some(update))
             .await?
         {
             HttpResponse::Success(user) => Ok(user),
@@ -328,9 +328,9 @@ impl HttpClient {
     }
 
     /// Update the current user's profile.
-    pub async fn update_user_profile(&self, update: UpdateUserProfile) -> Result<User> {
+    pub async fn update_user_profile(&self, update: UserProfileEdit) -> Result<User> {
         match self
-            .request::<User, (), UpdateUserProfile>("PATCH", "users/profile", None, Some(update))
+            .request::<User, (), UserProfileEdit>("PATCH", "users/profile", None, Some(update))
             .await?
         {
             HttpResponse::Success(user) => Ok(user),
