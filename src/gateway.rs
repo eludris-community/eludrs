@@ -386,7 +386,8 @@ impl Stream for Events {
                                         sphere_id,
                                     } => {
                                         // Clone the user before mutable borrow
-                                        let Some(old_user) = data.users.get(&user_id).cloned() else {
+                                        let Some(old_user) = data.users.get(&user_id).cloned()
+                                        else {
                                             log::warn!("User {} not found in cache", user_id);
                                             continue;
                                         };
