@@ -10,13 +10,16 @@ use std::{
 use anyhow::{bail, Result};
 use futures::{stream::SplitStream, SinkExt, Stream, StreamExt};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use todel::models::{ClientPayload, ServerPayload, Sphere, User};
+use todel::models::{ClientPayload, ServerPayload, User};
 use tokio::{net::TcpStream, sync::Mutex, task::JoinHandle, time};
 use tokio_tungstenite::{
     connect_async, tungstenite::Message as WSMessage, MaybeTlsStream, WebSocketStream,
 };
 
-use crate::{models::Event, GATEWAY_URL};
+use crate::{
+    models::{CachedMember, CachedSphere, Event},
+    GATEWAY_URL,
+};
 
 type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 
@@ -25,7 +28,7 @@ type WsReceiver = SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>;
 pub struct GatewayData {
     user: Option<User>,
     users: HashMap<u64, User>,
-    spheres: HashMap<u64, Sphere>,
+    spheres: HashMap<u64, CachedSphere>,
 }
 
 /// A Stream of Pandemonium events
@@ -105,10 +108,6 @@ impl Events {
                     heartbeat_interval, ..
                 }) = serde_json::from_str(&msg)
                 {
-                    time::sleep(Duration::from_millis(
-                        self.rng.lock().await.gen_range(0..heartbeat_interval),
-                    ))
-                    .await;
                     if let Err(err) = tx
                         .send(WSMessage::Text(
                             serde_json::to_string(&ClientPayload::Authenticate(self.token.clone()))
@@ -118,7 +117,9 @@ impl Events {
                     {
                         bail!("Encountered error while authenticating {:?}", err);
                     };
+                    let initial_heartbeat = self.rng.lock().await.gen_range(0..heartbeat_interval);
                     *ping = Some(tokio::spawn(async move {
+                        time::sleep(Duration::from_millis(initial_heartbeat)).await;
                         loop {
                             match tx
                                 .send(WSMessage::Text(
@@ -253,28 +254,342 @@ impl Stream for Events {
                         WSMessage::Text(msg) => {
                             if let Ok(payload) = serde_json::from_str(&msg) {
                                 match payload {
+                                    ServerPayload::Pong
+                                    | ServerPayload::RateLimit { .. }
+                                    | ServerPayload::Hello { .. } => {}
                                     ServerPayload::Authenticated { user, spheres } => {
                                         data.user = Some(user);
-                                        spheres.into_iter().for_each(|s| {
-                                            s.members.clone().into_iter().for_each(|u| {
-                                                data.users.insert(u.user.id, u.user);
-                                            });
-                                            data.spheres.insert(s.id, s);
+                                        spheres.into_iter().for_each(|sphere| {
+                                            let cached_sphere: CachedSphere = sphere.clone().into();
+                                            for member in sphere.members {
+                                                data.users.insert(member.user.id, member.user);
+                                            }
+                                            data.spheres.insert(cached_sphere.id, cached_sphere);
                                         });
                                         break Poll::Ready(Some(Event::Authenticated));
                                     }
                                     ServerPayload::MessageCreate(msg) => {
                                         break Poll::Ready(Some(Event::Message(msg)));
                                     }
+                                    ServerPayload::MessageUpdate {
+                                        channel_id,
+                                        message_id,
+                                        data,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageUpdate {
+                                            channel_id,
+                                            message_id,
+                                            data,
+                                        }));
+                                    }
+                                    ServerPayload::MessageEmbedPopulate {
+                                        channel_id,
+                                        message_id,
+                                        embeds,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageEmbedPopulate {
+                                            channel_id,
+                                            message_id,
+                                            embeds,
+                                        }));
+                                    }
+                                    ServerPayload::MessageDelete {
+                                        channel_id,
+                                        message_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageDelete {
+                                            channel_id,
+                                            message_id,
+                                        }));
+                                    }
+                                    ServerPayload::UserUpdate(user) => {
+                                        data.users.insert(user.id, user.clone());
+                                        break Poll::Ready(Some(Event::UserUpdate(user)));
+                                    }
                                     ServerPayload::PresenceUpdate { status, user_id } => {
-                                        let user = data.users.get(&user_id);
+                                        if let Some(user) = data.users.get_mut(&user_id) {
+                                            user.status = status.clone();
+                                        }
                                         break Poll::Ready(Some(Event::PresenceUpdate {
-                                            old_status: user.map(|u| u.status.clone()),
                                             user_id,
                                             status,
                                         }));
                                     }
-                                    _ => {}
+                                    ServerPayload::SphereJoin(sphere) => {
+                                        let cached_sphere: CachedSphere = sphere.into();
+                                        data.spheres
+                                            .insert(cached_sphere.id, cached_sphere.clone());
+                                        break Poll::Ready(Some(Event::SphereJoin(cached_sphere)));
+                                    }
+                                    ServerPayload::SphereUpdate {
+                                        data: sphere_data,
+                                        sphere_id,
+                                    } => {
+                                        if let Some(sphere) = data.spheres.get_mut(&sphere_id) {
+                                            let old = sphere.clone();
+                                            let data = sphere_data.clone();
+                                            if let Some(name) = sphere_data.name {
+                                                sphere.name = name;
+                                            }
+                                            if let Some(description) = sphere_data.description {
+                                                sphere.description = description;
+                                            }
+                                            if let Some(sphere_type) = sphere_data.sphere_type {
+                                                sphere.sphere_type = sphere_type;
+                                            }
+                                            if let Some(icon) = sphere_data.icon {
+                                                sphere.icon = icon;
+                                            }
+                                            if let Some(banner) = sphere_data.banner {
+                                                sphere.banner = banner;
+                                            }
+
+                                            break Poll::Ready(Some(Event::SphereUpdate {
+                                                old,
+                                                data,
+                                                sphere_id,
+                                            }));
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
+                                    }
+                                    ServerPayload::SphereLeave { sphere_id } => {
+                                        if let Some(sphere) = data.spheres.remove(&sphere_id) {
+                                            break Poll::Ready(Some(Event::SphereLeave(sphere)));
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
+                                    }
+                                    ServerPayload::SphereMemberJoin { user, sphere_id } => {
+                                        data.users.insert(user.id, user.clone());
+                                        if let Some(sphere) = data.spheres.get_mut(&sphere_id) {
+                                            let member = CachedMember {
+                                                user_id: user.id,
+                                                sphere_id,
+                                                nickname: None,
+                                                sphere_avatar: None,
+                                                sphere_banner: None,
+                                                sphere_bio: None,
+                                                sphere_status: None,
+                                            };
+                                            sphere.members.insert(user.id, member.clone());
+                                            break Poll::Ready(Some(Event::SphereMemberJoin(
+                                                member,
+                                            )));
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
+                                    }
+                                    ServerPayload::MemberUpdate {
+                                        data: member_data,
+                                        user_id,
+                                        sphere_id,
+                                    } => {
+                                        // Clone the user before mutable borrow
+                                        let Some(old_user) = data.users.get(&user_id).cloned()
+                                        else {
+                                            log::warn!("User {} not found in cache", user_id);
+                                            continue;
+                                        };
+
+                                        let Some(sphere) = data.spheres.get_mut(&sphere_id) else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                            continue;
+                                        };
+
+                                        let Some(member) = sphere.members.get_mut(&user_id) else {
+                                            log::warn!(
+                                                "Member {} not found in sphere {}",
+                                                user_id,
+                                                sphere_id
+                                            );
+                                            continue;
+                                        };
+
+                                        let old = member.clone();
+                                        let old_member = old.into_member(old_user);
+                                        let data = member_data.clone();
+                                        if let Some(nickname) = member_data.nickname {
+                                            member.nickname = nickname;
+                                        }
+                                        if let Some(avatar) = member_data.sphere_avatar {
+                                            member.sphere_avatar = avatar;
+                                        }
+                                        if let Some(banner) = member_data.sphere_banner {
+                                            member.sphere_banner = banner;
+                                        }
+                                        if let Some(bio) = member_data.sphere_bio {
+                                            member.sphere_bio = bio;
+                                        }
+                                        if let Some(status) = member_data.sphere_status {
+                                            member.sphere_status = status;
+                                        }
+                                        break Poll::Ready(Some(Event::MemberUpdate {
+                                            old: old_member,
+                                            data,
+                                            user_id,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::SphereMemberLeave { user_id, sphere_id } => {
+                                        if let Some(member) = data
+                                            .spheres
+                                            .get_mut(&sphere_id)
+                                            .and_then(|s| s.members.remove(&user_id))
+                                        {
+                                            break Poll::Ready(Some(Event::SphereMemberLeave(
+                                                member,
+                                            )));
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
+                                    }
+                                    ServerPayload::CategoryCreate {
+                                        category,
+                                        sphere_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::CategoryCreate {
+                                            category,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::CategoryUpdate {
+                                        data,
+                                        category_id,
+                                        sphere_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::CategoryUpdate {
+                                            data,
+                                            category_id,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::CategoryDelete {
+                                        category_id,
+                                        sphere_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::CategoryDelete {
+                                            category_id,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::SphereChannelCreate { channel, sphere_id } => {
+                                        break Poll::Ready(Some(Event::SphereChannelCreate {
+                                            channel,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::SphereChannelUpdate {
+                                        data,
+                                        channel_id,
+                                        sphere_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::SphereChannelUpdate {
+                                            data,
+                                            channel_id,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::SphereChannelDelete {
+                                        channel_id,
+                                        sphere_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::SphereChannelDelete {
+                                            channel_id,
+                                            sphere_id,
+                                        }));
+                                    }
+                                    ServerPayload::EmojiCreate { sphere_id, emoji } => {
+                                        if let Some(sphere) = data.spheres.get_mut(&sphere_id) {
+                                            sphere.emojis.insert(emoji.id, emoji.clone());
+                                            break Poll::Ready(Some(Event::EmojiCreate(emoji)));
+                                        } else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                        }
+                                    }
+                                    ServerPayload::EmojiUpdate {
+                                        sphere_id,
+                                        emoji_id,
+                                        data: emoji_data,
+                                    } => {
+                                        let Some(sphere) = data.spheres.get_mut(&sphere_id) else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                            continue;
+                                        };
+
+                                        let Some(emoji) = sphere.emojis.get_mut(&emoji_id) else {
+                                            log::warn!(
+                                                "Emoji {} not found in sphere {}",
+                                                emoji_id,
+                                                sphere_id
+                                            );
+                                            continue;
+                                        };
+
+                                        let old = emoji.clone();
+                                        let data = emoji_data.clone();
+                                        emoji.name = emoji_data.name;
+                                        break Poll::Ready(Some(Event::EmojiUpdate {
+                                            old,
+                                            data,
+                                            sphere_id,
+                                            emoji_id,
+                                        }));
+                                    }
+                                    ServerPayload::EmojiDelete {
+                                        sphere_id,
+                                        emoji_id,
+                                    } => {
+                                        let Some(sphere) = data.spheres.get_mut(&sphere_id) else {
+                                            log::warn!("Sphere {} not found in cache", sphere_id);
+                                            continue;
+                                        };
+
+                                        if let Some(emoji) = sphere.emojis.remove(&emoji_id) {
+                                            break Poll::Ready(Some(Event::EmojiDelete(emoji)));
+                                        } else {
+                                            log::warn!(
+                                                "Emoji {} not found in sphere {}",
+                                                emoji_id,
+                                                sphere_id
+                                            );
+                                        }
+                                    }
+                                    ServerPayload::MessageReact {
+                                        channel_id,
+                                        message_id,
+                                        user_id,
+                                        emoji,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageReact {
+                                            channel_id,
+                                            message_id,
+                                            user_id,
+                                            emoji,
+                                        }));
+                                    }
+                                    ServerPayload::MessageReactionClear {
+                                        channel_id,
+                                        message_id,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageReactionClear {
+                                            channel_id,
+                                            message_id,
+                                        }));
+                                    }
+                                    ServerPayload::MessageReactionDelete {
+                                        channel_id,
+                                        message_id,
+                                        user_id,
+                                        emoji,
+                                    } => {
+                                        break Poll::Ready(Some(Event::MessageReactionDelete {
+                                            channel_id,
+                                            message_id,
+                                            user_id,
+                                            emoji,
+                                        }));
+                                    }
                                 }
                             }
                         }

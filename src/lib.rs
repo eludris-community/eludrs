@@ -48,6 +48,7 @@
 //! ```shell
 //! cargo doc -p eludrs --open
 //! ```
+mod builders;
 mod gateway;
 mod http;
 pub mod models;
@@ -55,13 +56,8 @@ pub mod models;
 pub use gateway::{Events, GatewayClient};
 pub use http::HttpClient;
 
-/// All the todel models re-exported
-pub mod todel {
-    pub use todel::*;
-}
-
 /// The default rest url
 pub const REST_URL: &str = "https://api.eludris.com";
 
 /// The default gateway url
-pub const GATEWAY_URL: &str = "wss://ws.eludris.com";
+pub const GATEWAY_URL: &str = "wss://ws.eludris.com/";
