@@ -577,17 +577,6 @@ impl HttpClient {
         }
     }
 
-    /// Get the current user.
-    pub async fn get_current_user(&self) -> Result<User> {
-        match self
-            .request::<User, (), ()>("GET", "users/@me", None, None)
-            .await?
-        {
-            HttpResponse::Success(user) => Ok(user),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get user: {:?}", err)),
-        }
-    }
-
     /// Edit the current user.
     pub async fn edit_user(&self, password: String) -> EditUser<'_> {
         EditUser::new(self, password)
@@ -598,7 +587,7 @@ impl HttpClient {
         EditUserProfile::new(self)
     }
 
-    /// Get a user by their ID or username.
+    /// Get a user by their ID, username, or @me for the current user.
     pub async fn get_user(&self, user_identifier: UserIdentifier) -> Result<User> {
         match self
             .request::<User, (), ()>("GET", &format!("users/{}", user_identifier), None, None)
