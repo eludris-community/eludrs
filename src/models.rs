@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
-use todel::models::*;
+pub use todel::models::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]

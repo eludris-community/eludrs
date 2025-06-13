@@ -56,11 +56,6 @@ pub mod models;
 pub use gateway::{Events, GatewayClient};
 pub use http::HttpClient;
 
-/// All the todel models re-exported
-pub mod todel {
-    pub use todel::models::*;
-}
-
 /// The default rest url
 pub const REST_URL: &str = "https://api.eludris.com";
 
