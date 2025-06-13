@@ -233,7 +233,7 @@ impl HttpClient {
     }
 
     /// Edit an emoji.
-    pub async fn edit_emoji(&self, emoji_id: u64) -> EditEmoji<'_> {
+    pub fn edit_emoji(&self, emoji_id: u64) -> EditEmoji<'_> {
         EditEmoji::new(self, emoji_id)
     }
 
@@ -298,23 +298,19 @@ impl HttpClient {
     }
 
     /// Edit a member.
-    pub async fn edit_member(
-        &self,
-        sphere_id: u64,
-        member_identifier: UserIdentifier,
-    ) -> EditMember<'_> {
+    pub fn edit_member(&self, sphere_id: u64, member_identifier: UserIdentifier) -> EditMember<'_> {
         EditMember::new(self, sphere_id, member_identifier)
     }
 
     // # Messaging
 
     /// Send a message
-    pub async fn send_message(&self, channel_id: u64) -> CreateMessage {
+    pub fn send_message(&self, channel_id: u64) -> CreateMessage {
         CreateMessage::new(self, channel_id)
     }
 
     /// Edit a message.
-    pub async fn edit_message(&self, channel_id: u64, message_id: u64) -> EditMessage<'_> {
+    pub fn edit_message(&self, channel_id: u64, message_id: u64) -> EditMessage<'_> {
         EditMessage::new(self, channel_id, message_id)
     }
 
@@ -351,7 +347,7 @@ impl HttpClient {
     }
 
     /// Get messages from a channel.
-    pub async fn get_messages(&self, channel_id: u64) -> GetMessages<'_> {
+    pub fn get_messages(&self, channel_id: u64) -> GetMessages<'_> {
         GetMessages::new(self, channel_id)
     }
 
@@ -449,7 +445,7 @@ impl HttpClient {
     }
 
     /// Edit a category.
-    pub async fn edit_category(&self, sphere_id: u64, category_id: u64) -> EditCategory<'_> {
+    pub fn edit_category(&self, sphere_id: u64, category_id: u64) -> EditCategory<'_> {
         EditCategory::new(self, sphere_id, category_id)
     }
 
@@ -472,7 +468,7 @@ impl HttpClient {
     }
 
     /// Create a channel.
-    pub async fn create_channel(
+    pub fn create_channel(
         &self,
         sphere_id: u64,
         name: String,
@@ -482,7 +478,7 @@ impl HttpClient {
     }
 
     /// Edit a channel.
-    pub async fn edit_channel(&self, sphere_id: u64, channel_id: u64) -> EditChannel<'_> {
+    pub fn edit_channel(&self, sphere_id: u64, channel_id: u64) -> EditChannel<'_> {
         EditChannel::new(self, sphere_id, channel_id)
     }
 
@@ -503,7 +499,7 @@ impl HttpClient {
     }
 
     /// Create a sphere.
-    pub async fn create_sphere(&self, slug: String, sphere_type: SphereType) -> CreateSphere<'_> {
+    pub fn create_sphere(&self, slug: String, sphere_type: SphereType) -> CreateSphere<'_> {
         CreateSphere::new(self, slug, sphere_type)
     }
 
@@ -578,12 +574,12 @@ impl HttpClient {
     }
 
     /// Edit the current user.
-    pub async fn edit_user(&self, password: String) -> EditUser<'_> {
+    pub fn edit_user(&self, password: String) -> EditUser<'_> {
         EditUser::new(self, password)
     }
 
     /// Edit the current user's profile.
-    pub async fn edit_user_profile(&self) -> EditUserProfile<'_> {
+    pub fn edit_user_profile(&self) -> EditUserProfile<'_> {
         EditUserProfile::new(self)
     }
 
