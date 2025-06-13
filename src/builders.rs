@@ -177,8 +177,8 @@ impl<'a> CreateMessage<'a> {
         self
     }
 
-    pub fn disguise(mut self, disguise: Option<MessageDisguise>) -> Self {
-        self.data.disguise = disguise;
+    pub fn disguise(mut self, disguise: MessageDisguise) -> Self {
+        self.data.disguise = Some(disguise);
         self
     }
 
@@ -187,8 +187,8 @@ impl<'a> CreateMessage<'a> {
         self
     }
 
-    pub fn reference(mut self, reference: Option<u64>) -> Self {
-        self.data.reference = reference;
+    pub fn reference(mut self, reference: u64) -> Self {
+        self.data.reference = Some(reference);
         self
     }
 }
