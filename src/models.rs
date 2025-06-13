@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use serde::{Deserialize, Serialize};
 use todel::models::*;
@@ -8,6 +8,44 @@ use todel::models::*;
 pub(crate) enum HttpResponse<T> {
     Success(T),
     Error(ErrorResponse),
+}
+
+#[derive(Clone, Debug)]
+pub enum SphereIdentifier {
+    ID(u64),
+    Slug(String),
+}
+
+impl Display for SphereIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SphereIdentifier::ID(id) => write!(f, "{}", id),
+            SphereIdentifier::Slug(slug) => f.write_str(slug),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum UserIdentifier {
+    Me,
+    ID(u64),
+    Username(String),
+}
+
+impl Display for UserIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UserIdentifier::Me => f.write_str("@me"),
+            UserIdentifier::ID(id) => write!(f, "{}", id),
+            UserIdentifier::Username(slug) => f.write_str(slug),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyResponse {
+    pub file: Vec<u8>,
+    pub content_type: String,
 }
 
 /// An abstraction over gateway event types

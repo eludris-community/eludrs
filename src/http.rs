@@ -1,14 +1,17 @@
-use crate::{models::HttpResponse, GatewayClient, REST_URL};
+use crate::{
+    builders::{
+        CreateChannel, CreateMessage, CreateSphere, EditCategory, EditChannel, EditEmoji,
+        EditMember, EditMessage, EditUser, EditUserProfile, GetMessages,
+    },
+    models::{HttpResponse, ProxyResponse, SphereIdentifier, UserIdentifier},
+    GatewayClient, REST_URL,
+};
 use anyhow::Result;
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map};
-use std::{fmt::Display, str::FromStr, time::Duration};
-use todel::models::{
-    Category, ErrorResponse, InstanceInfo, Message, MessageCreate, MessageDisguise,
-    PasswordDeleteCredentials, PasswordReset, Session, SessionCreate, SessionCreated, Sphere,
-    SphereChannel, SphereType, User, UserCreate, UserEdit, UserProfileEdit,
-};
+use serde_json::json;
+use std::{str::FromStr, time::Duration};
+use todel::models::*;
 use tokio::time;
 
 /// Simple Http client
@@ -46,22 +49,11 @@ impl HttpClient {
         self
     }
 
-    /// Fetch the info payload of an instance
-    pub async fn fetch_instance_info(&self) -> Result<InstanceInfo> {
-        Ok(self.client.get(&self.rest_url).send().await?.json().await?)
-    }
-
-    /// Try to get the client's internal InstanceInfo or fetch it if it does not already exist
-    pub async fn get_instance_info(&mut self) -> Result<&InstanceInfo> {
-        if self.instance_info.is_some() {
-            Ok(self.instance_info.as_ref().unwrap())
-        } else {
-            self.instance_info = Some(self.fetch_instance_info().await?);
-            Ok(self.instance_info.as_ref().unwrap())
-        }
-    }
-
-    async fn request<T: for<'a> Deserialize<'a>, Q: Serialize + ?Sized, B: Serialize + Sized>(
+    pub(crate) async fn request<
+        T: for<'a> Deserialize<'a>,
+        Q: Serialize + ?Sized,
+        B: Serialize + Sized,
+    >(
         &self,
         method: &str,
         path: &str,
@@ -121,86 +113,142 @@ impl HttpClient {
         }
     }
 
-    /// Send a message
-    pub async fn send_message<C: Display>(
-        &self,
-        channel_id: u64,
-        content: C,
-        reference: Option<u64>,
-    ) -> Result<Message> {
-        self.send_msg(channel_id, content.to_string(), None, reference)
-            .await
-    }
+    // # Channels
 
-    /// Send a message with a [`MessageDisguise`]
-    pub async fn send_message_with_disguise<C: Display>(
-        &self,
-        channel_id: u64,
-        content: C,
-        disguise: MessageDisguise,
-        reference: Option<u64>,
-    ) -> Result<Message> {
-        self.send_msg(channel_id, content.to_string(), Some(disguise), reference)
-            .await
-    }
-
-    async fn send_msg(
-        &self,
-        channel_id: u64,
-        content: String,
-        disguise: Option<MessageDisguise>,
-        reference: Option<u64>,
-    ) -> Result<Message> {
-        let message = MessageCreate {
-            content,
-            disguise,
-            reference,
-        };
+    /// Get a channel by its ID.
+    pub async fn get_channel(&self, channel_id: u64) -> Result<SphereChannel> {
         match self
-            .request::<Message, (), MessageCreate>(
-                "POST",
-                &format!("/channels/{}/messages", channel_id),
-                None,
-                Some(message),
-            )
-            .await?
-        {
-            HttpResponse::Success(data) => Ok(data),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could) not send message: {:?}", err)),
-        }
-    }
-
-    /// Get messages from a channel.
-    pub async fn get_messages(
-        &self,
-        channel_id: u64,
-        before: Option<u64>,
-        after: Option<u64>,
-        limit: Option<u8>,
-    ) -> Result<Vec<Message>> {
-        let mut query = vec![];
-        if let Some(before) = before {
-            query.push(("before", before.to_string()));
-        }
-        if let Some(after) = after {
-            query.push(("after", after.to_string()));
-        }
-        if let Some(limit) = limit {
-            query.push(("limit", limit.to_string()));
-        }
-        match self
-            .request::<Vec<Message>, Vec<(&str, String)>, ()>(
+            .request::<SphereChannel, (), ()>(
                 "GET",
-                &format!("channels/{}/messages", channel_id),
-                Some(&query),
+                &format!("channels/{}", channel_id),
+                None,
                 None,
             )
             .await?
         {
-            HttpResponse::Success(messages) => Ok(messages),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get messages: {:?}", err)),
+            HttpResponse::Success(channel) => Ok(channel),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get channel: {:?}", err)),
         }
     }
+
+    // # Emojis
+
+    /// Add a reaction to a message.
+    pub async fn add_reaction(
+        &self,
+        channel_id: u64,
+        message_id: u64,
+        emoji: ReactionEmoji,
+    ) -> Result<Message> {
+        let emoji_ref = emoji.get_ref();
+        match self
+            .request::<Message, (), ReactionEmojiReference>(
+                "POST",
+                &format!("channels/{}/messages/{}/reactions", channel_id, message_id),
+                None,
+                Some(emoji_ref),
+            )
+            .await?
+        {
+            HttpResponse::Success(message) => Ok(message),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not add reaction: {:?}", err)),
+        }
+    }
+
+    /// Remove all reactions from a message.
+    pub async fn clear_reactions(&self, channel_id: u64, message_id: u64) -> Result<Message> {
+        match self
+            .request::<Message, (), ()>(
+                "DELETE",
+                &format!(
+                    "channels/{}/messages/{}/reactions/clear",
+                    channel_id, message_id
+                ),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(message) => Ok(message),
+            HttpResponse::Error(err) => {
+                Err(anyhow::anyhow!("Could not clear reactions: {:?}", err))
+            }
+        }
+    }
+
+    /// Remove a reaction from a message.
+    pub async fn remove_reaction(
+        &self,
+        channel_id: u64,
+        message_id: u64,
+        emoji: ReactionEmoji,
+    ) -> Result<Message> {
+        let emoji_ref = emoji.get_ref();
+        match self
+            .request::<Message, (), ReactionEmojiReference>(
+                "DELETE",
+                &format!("channels/{}/messages/{}/reactions", channel_id, message_id),
+                None,
+                Some(emoji_ref),
+            )
+            .await?
+        {
+            HttpResponse::Success(message) => Ok(message),
+            HttpResponse::Error(err) => {
+                Err(anyhow::anyhow!("Could not remove reaction: {:?}", err))
+            }
+        }
+    }
+
+    /// Create an emoji within a sphere.
+    pub async fn create_emoji(
+        &self,
+        sphere_identifier: SphereIdentifier,
+        file_id: u64,
+        name: String,
+    ) -> Result<Emoji> {
+        match self
+            .request::<Emoji, (), EmojiCreate>(
+                "POST",
+                &format!("spheres/{}/emojis", sphere_identifier),
+                None,
+                Some(EmojiCreate { file_id, name }),
+            )
+            .await?
+        {
+            HttpResponse::Success(emoji) => Ok(emoji),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not create emoji: {:?}", err)),
+        }
+    }
+
+    /// Get an emoji by its ID.
+    pub async fn get_emoji(&self, emoji_id: u64) -> Result<Emoji> {
+        match self
+            .request::<Emoji, (), ()>("GET", &format!("emojis/{}", emoji_id), None, None)
+            .await?
+        {
+            HttpResponse::Success(emoji) => Ok(emoji),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get emoji: {:?}", err)),
+        }
+    }
+
+    /// Edit an emoji.
+    pub async fn edit_emoji(&self, emoji_id: u64) -> EditEmoji<'_> {
+        EditEmoji::new(self, emoji_id)
+    }
+
+    /// Delete an emoji.
+    pub async fn delete_emoji(&self, emoji_id: u64) -> Result<()> {
+        match self
+            .request::<(), (), ()>("DELETE", &format!("emojis/{}", emoji_id), None, None)
+            .await?
+        {
+            HttpResponse::Success(_) => Ok(()),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not delete emoji: {:?}", err)),
+        }
+    }
+
+    // # Gateway
 
     /// Create a [`GatewayClient`] using the connected instance's instance info
     /// pandemonium url if any.
@@ -209,6 +257,122 @@ impl HttpClient {
         let gateway_url = info.pandemonium_url.clone();
         Ok(GatewayClient::new(&self.token).gateway_url(gateway_url))
     }
+
+    // # Instance
+
+    /// Fetch the info payload of an instance
+    pub async fn fetch_instance_info(&self) -> Result<InstanceInfo> {
+        Ok(self.client.get(&self.rest_url).send().await?.json().await?)
+    }
+
+    /// Try to get the client's internal InstanceInfo or fetch it if it does not already exist
+    pub async fn get_instance_info(&mut self) -> Result<&InstanceInfo> {
+        if self.instance_info.is_some() {
+            Ok(self.instance_info.as_ref().unwrap())
+        } else {
+            self.instance_info = Some(self.fetch_instance_info().await?);
+            Ok(self.instance_info.as_ref().unwrap())
+        }
+    }
+
+    // # Members
+
+    /// Get a member.
+    pub async fn get_member(
+        &self,
+        sphere_id: u64,
+        member_identifier: UserIdentifier,
+    ) -> Result<Member> {
+        match self
+            .request::<Member, (), ()>(
+                "GET",
+                &format!("spheres/{}/members/{}", sphere_id, member_identifier),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(member) => Ok(member),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get member: {:?}", err)),
+        }
+    }
+
+    /// Edit a member.
+    pub async fn edit_member(
+        &self,
+        sphere_id: u64,
+        member_identifier: UserIdentifier,
+    ) -> EditMember<'_> {
+        EditMember::new(self, sphere_id, member_identifier)
+    }
+
+    // # Messaging
+
+    /// Send a message
+    pub async fn send_message(&self, channel_id: u64) -> CreateMessage {
+        CreateMessage::new(self, channel_id)
+    }
+
+    /// Edit a message.
+    pub async fn edit_message(&self, channel_id: u64, message_id: u64) -> EditMessage<'_> {
+        EditMessage::new(self, channel_id, message_id)
+    }
+
+    /// Delete a message.
+    pub async fn delete_message(&self, channel_id: u64, message_id: u64) -> Result<()> {
+        match self
+            .request::<(), (), ()>(
+                "DELETE",
+                &format!("channels/{}/messages/{}", channel_id, message_id),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(_) => Ok(()),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not delete message: {:?}", err)),
+        }
+    }
+
+    /// Get a message by its ID.
+    pub async fn get_message(&self, channel_id: u64, message_id: u64) -> Result<Message> {
+        match self
+            .request::<Message, (), ()>(
+                "GET",
+                &format!("channels/{}/messages/{}", channel_id, message_id),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(message) => Ok(message),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get message: {:?}", err)),
+        }
+    }
+
+    /// Get messages from a channel.
+    pub async fn get_messages(&self, channel_id: u64) -> GetMessages<'_> {
+        GetMessages::new(self, channel_id)
+    }
+
+    // # Proxy
+
+    pub async fn proxy(&self, url: String) -> Result<ProxyResponse> {
+        match self
+            .request::<ProxyResponse, [(&str, String)], ()>(
+                "GET",
+                "format",
+                Some(&[("url", url)]),
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(response) => Ok(response),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not proxy request: {:?}", err)),
+        }
+    }
+
+    // # Sessions
 
     /// Create a session.
     pub async fn create_session(
@@ -264,6 +428,114 @@ impl HttpClient {
         }
     }
 
+    // # Spheres
+
+    /// Create a category.
+    pub async fn create_category(&self, sphere_id: u64, name: String) -> Result<Category> {
+        match self
+            .request::<Category, (), CategoryCreate>(
+                "POST",
+                &format!("spheres/{}/categories", sphere_id),
+                None,
+                Some(CategoryCreate { name }),
+            )
+            .await?
+        {
+            HttpResponse::Success(category) => Ok(category),
+            HttpResponse::Error(err) => {
+                Err(anyhow::anyhow!("Could not create category: {:?}", err))
+            }
+        }
+    }
+
+    /// Edit a category.
+    pub async fn edit_category(&self, sphere_id: u64, category_id: u64) -> EditCategory<'_> {
+        EditCategory::new(self, sphere_id, category_id)
+    }
+
+    /// Delete a category.
+    pub async fn delete_category(&self, sphere_id: u64, category_id: u64) -> Result<()> {
+        match self
+            .request::<(), (), ()>(
+                "DELETE",
+                &format!("spheres/{}/categories/{}", sphere_id, category_id),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(_) => Ok(()),
+            HttpResponse::Error(err) => {
+                Err(anyhow::anyhow!("Could not delete category: {:?}", err))
+            }
+        }
+    }
+
+    /// Create a channel.
+    pub async fn create_channel(
+        &self,
+        sphere_id: u64,
+        name: String,
+        channel_type: SphereChannelType,
+    ) -> CreateChannel<'_> {
+        CreateChannel::new(self, sphere_id, name, channel_type)
+    }
+
+    /// Edit a channel.
+    pub async fn edit_channel(&self, sphere_id: u64, channel_id: u64) -> EditChannel<'_> {
+        EditChannel::new(self, sphere_id, channel_id)
+    }
+
+    /// Delete a channel.
+    pub async fn delete_channel(&self, sphere_id: u64, channel_id: u64) -> Result<()> {
+        match self
+            .request::<(), (), ()>(
+                "DELETE",
+                &format!("spheres/{}/channels/{}", sphere_id, channel_id),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(_) => Ok(()),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not delete channel: {:?}", err)),
+        }
+    }
+
+    /// Create a sphere.
+    pub async fn create_sphere(&self, slug: String, sphere_type: SphereType) -> CreateSphere<'_> {
+        CreateSphere::new(self, slug, sphere_type)
+    }
+
+    /// Get a sphere by its ID or slug.
+    pub async fn get_sphere(&self, sphere_identifier: SphereIdentifier) -> Result<Sphere> {
+        match self
+            .request::<Sphere, (), ()>("GET", &format!("spheres/{}", sphere_identifier), None, None)
+            .await?
+        {
+            HttpResponse::Success(sphere) => Ok(sphere),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get sphere: {:?}", err)),
+        }
+    }
+
+    /// Join a sphere by its ID or slug.
+    pub async fn join_sphere(&self, sphere_identifier: SphereIdentifier) -> Result<()> {
+        match self
+            .request::<(), (), ()>(
+                "GET",
+                &format!("spheres/{}/join", sphere_identifier),
+                None,
+                None,
+            )
+            .await?
+        {
+            HttpResponse::Success(_) => Ok(()),
+            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not join sphere: {:?}", err)),
+        }
+    }
+
+    // # Users
+
     /// Create a user.
     pub async fn create_user(
         &self,
@@ -306,7 +578,7 @@ impl HttpClient {
     }
 
     /// Get the current user.
-    pub async fn get_user(&self) -> Result<User> {
+    pub async fn get_current_user(&self) -> Result<User> {
         match self
             .request::<User, (), ()>("GET", "users/@me", None, None)
             .await?
@@ -316,45 +588,20 @@ impl HttpClient {
         }
     }
 
-    /// Update the current user.
-    pub async fn update_user(&self, update: UserEdit) -> Result<User> {
-        match self
-            .request::<User, (), UserEdit>("PATCH", "users", None, Some(update))
-            .await?
-        {
-            HttpResponse::Success(user) => Ok(user),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not update user: {:?}", err)),
-        }
+    /// Edit the current user.
+    pub async fn edit_user(&self, password: String) -> EditUser<'_> {
+        EditUser::new(self, password)
     }
 
-    /// Update the current user's profile.
-    pub async fn update_user_profile(&self, update: UserProfileEdit) -> Result<User> {
-        match self
-            .request::<User, (), UserProfileEdit>("PATCH", "users/profile", None, Some(update))
-            .await?
-        {
-            HttpResponse::Success(user) => Ok(user),
-            HttpResponse::Error(err) => {
-                Err(anyhow::anyhow!("Could not update user profile: {:?}", err))
-            }
-        }
+    /// Edit the current user's profile.
+    pub async fn edit_user_profile(&self) -> EditUserProfile<'_> {
+        EditUserProfile::new(self)
     }
 
-    /// Get a user by their id.
-    pub async fn get_user_by_id(&self, user_id: u64) -> Result<User> {
+    /// Get a user by their ID or username.
+    pub async fn get_user(&self, user_identifier: UserIdentifier) -> Result<User> {
         match self
-            .request::<User, (), ()>("GET", &format!("users/{}", user_id), None, None)
-            .await?
-        {
-            HttpResponse::Success(user) => Ok(user),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get user: {:?}", err)),
-        }
-    }
-
-    /// Get a user by their username.
-    pub async fn get_user_by_username(&self, username: String) -> Result<User> {
-        match self
-            .request::<User, (), ()>("GET", &format!("users/{}", username), None, None)
+            .request::<User, (), ()>("GET", &format!("users/{}", user_identifier), None, None)
             .await?
         {
             HttpResponse::Success(user) => Ok(user),
@@ -367,7 +614,7 @@ impl HttpClient {
         match self
             .request::<(), [(&str, String)], ()>(
                 "POST",
-                "/users/verify",
+                "users/verify",
                 Some(&[("code", code)]),
                 None,
             )
@@ -381,7 +628,7 @@ impl HttpClient {
     /// Resend the verification email.
     pub async fn resend_verification(&self) -> Result<()> {
         match self
-            .request::<(), (), u8>("POST", "/users/resend-verification", None, None)
+            .request::<(), (), u8>("POST", "users/resend-verification", None, None)
             .await?
         {
             HttpResponse::Success(_) => Ok(()),
@@ -397,7 +644,7 @@ impl HttpClient {
         match self
             .request::<(), (), serde_json::Value>(
                 "POST",
-                "/users/reset-password",
+                "users/reset-password",
                 None,
                 Some(json!({ "email": email })),
             )
@@ -416,7 +663,7 @@ impl HttpClient {
         match self
             .request::<(), (), PasswordReset>(
                 "POST",
-                "/users/reset-password",
+                "users/reset-password",
                 None,
                 Some(PasswordReset {
                     code,
@@ -428,254 +675,6 @@ impl HttpClient {
         {
             HttpResponse::Success(_) => Ok(()),
             HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not reset password: {:?}", err)),
-        }
-    }
-
-    /// Get a channel by its id.
-    pub async fn get_channel(&self, channel_id: u64) -> Result<SphereChannel> {
-        match self
-            .request::<SphereChannel, (), ()>(
-                "GET",
-                &format!("channels/{}", channel_id),
-                None,
-                None,
-            )
-            .await?
-        {
-            HttpResponse::Success(channel) => Ok(channel),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get channel: {:?}", err)),
-        }
-    }
-
-    /// Create a category.
-    pub async fn create_category(&self, sphere_id: u64, name: String) -> Result<Category> {
-        match self
-            .request::<Category, (), serde_json::Value>(
-                "POST",
-                &format!("spheres/{}/categories", sphere_id),
-                None,
-                Some(json!({ "name": name })),
-            )
-            .await?
-        {
-            HttpResponse::Success(category) => Ok(category),
-            HttpResponse::Error(err) => {
-                Err(anyhow::anyhow!("Could not create category: {:?}", err))
-            }
-        }
-    }
-
-    /// Edit a category.
-    pub async fn edit_category(
-        &self,
-        sphere_id: u64,
-        category_id: u64,
-        name: Option<String>,
-        position: Option<u8>,
-    ) -> Result<Category> {
-        let mut map = Map::new();
-        if let Some(name) = name {
-            map.insert("name".to_string(), name.into());
-        };
-        if let Some(position) = position {
-            map.insert("position".to_string(), position.into());
-        };
-
-        match self
-            .request::<Category, (), serde_json::Value>(
-                "PATCH",
-                &format!("spheres/{}/categories/{}", sphere_id, category_id),
-                None,
-                Some(serde_json::Value::Object(map)),
-            )
-            .await?
-        {
-            HttpResponse::Success(category) => Ok(category),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not edit category: {:?}", err)),
-        }
-    }
-
-    /// Delete a category.
-    pub async fn delete_category(&self, sphere_id: u64, category_id: u64) -> Result<()> {
-        match self
-            .request::<(), (), ()>(
-                "DELETE",
-                &format!("spheres/{}/categories/{}", sphere_id, category_id),
-                None,
-                None,
-            )
-            .await?
-        {
-            HttpResponse::Success(_) => Ok(()),
-            HttpResponse::Error(err) => {
-                Err(anyhow::anyhow!("Could not delete category: {:?}", err))
-            }
-        }
-    }
-
-    /// Create a text channel.
-    pub async fn create_text_channel(
-        &self,
-        sphere_id: u64,
-        name: String,
-        topic: Option<String>,
-        category_id: Option<u64>,
-    ) -> Result<SphereChannel> {
-        let mut map = Map::new();
-        map.insert("name".to_string(), name.into());
-        map.insert("type".to_string(), "text".into());
-        if let Some(topic) = topic {
-            map.insert("topic".to_string(), topic.into());
-        };
-        if let Some(category_id) = category_id {
-            map.insert("category_id".to_string(), category_id.into());
-        };
-
-        match self
-            .request::<SphereChannel, (), serde_json::Value>(
-                "POST",
-                &format!("spheres/{}/channels", sphere_id),
-                None,
-                Some(serde_json::Value::Object(map)),
-            )
-            .await?
-        {
-            HttpResponse::Success(channel) => Ok(channel),
-            HttpResponse::Error(err) => {
-                Err(anyhow::anyhow!("Could not create text channel: {:?}", err))
-            }
-        }
-    }
-
-    /// Edit a text channel.
-    pub async fn edit_text_channel(
-        &self,
-        sphere_id: u64,
-        channel_id: u64,
-        name: Option<String>,
-        topic: Option<String>,
-        position: Option<u8>,
-    ) -> Result<SphereChannel> {
-        let mut map = Map::new();
-        if let Some(name) = name {
-            map.insert("name".to_string(), name.into());
-        };
-        if let Some(topic) = topic {
-            map.insert("topic".to_string(), topic.into());
-        };
-        if let Some(position) = position {
-            map.insert("position".to_string(), position.into());
-        };
-
-        match self
-            .request::<SphereChannel, (), serde_json::Value>(
-                "PATCH",
-                &format!("spheres/{}/channels/{}", sphere_id, channel_id),
-                None,
-                Some(serde_json::Value::Object(map)),
-            )
-            .await?
-        {
-            HttpResponse::Success(channel) => Ok(channel),
-            HttpResponse::Error(err) => {
-                Err(anyhow::anyhow!("Could not edit text channel: {:?}", err))
-            }
-        }
-    }
-
-    /// Delete a channel.
-    pub async fn delete_channel(&self, sphere_id: u64, channel_id: u64) -> Result<()> {
-        match self
-            .request::<(), (), ()>(
-                "DELETE",
-                &format!("spheres/{}/channels/{}", sphere_id, channel_id),
-                None,
-                None,
-            )
-            .await?
-        {
-            HttpResponse::Success(_) => Ok(()),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not delete channel: {:?}", err)),
-        }
-    }
-
-    /// Create a sphere.
-    pub async fn create_sphere(
-        &self,
-        slug: String,
-        typ: SphereType,
-        description: Option<String>,
-        icon: Option<u64>,
-        banner: Option<u64>,
-    ) -> Result<Sphere> {
-        let mut map = Map::new();
-        map.insert("slug".to_string(), slug.into());
-        map.insert("type".to_string(), serde_json::to_value(typ)?);
-        if let Some(description) = description {
-            map.insert("description".to_string(), description.into());
-        };
-        if let Some(icon) = icon {
-            map.insert("icon".to_string(), icon.into());
-        };
-        if let Some(banner) = banner {
-            map.insert("banner".to_string(), banner.into());
-        };
-
-        match self
-            .request::<Sphere, (), serde_json::Value>(
-                "POST",
-                "spheres",
-                None,
-                Some(serde_json::Value::Object(map)),
-            )
-            .await?
-        {
-            HttpResponse::Success(sphere) => Ok(sphere),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not create sphere: {:?}", err)),
-        }
-    }
-
-    /// Get a sphere by its id.
-    pub async fn get_sphere(&self, sphere_id: u64) -> Result<Sphere> {
-        match self
-            .request::<Sphere, (), ()>("GET", &format!("spheres/{}", sphere_id), None, None)
-            .await?
-        {
-            HttpResponse::Success(sphere) => Ok(sphere),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get sphere: {:?}", err)),
-        }
-    }
-
-    /// Get a sphere by its slug.
-    pub async fn get_sphere_by_slug(&self, slug: String) -> Result<Sphere> {
-        match self
-            .request::<Sphere, (), ()>("GET", &format!("spheres/{}", slug), None, None)
-            .await?
-        {
-            HttpResponse::Success(sphere) => Ok(sphere),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not get sphere: {:?}", err)),
-        }
-    }
-
-    /// Join a sphere by its id.
-    pub async fn join_sphere(&self, sphere_id: u64) -> Result<()> {
-        match self
-            .request::<(), (), ()>("GET", &format!("spheres/{}/join", sphere_id), None, None)
-            .await?
-        {
-            HttpResponse::Success(_) => Ok(()),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not join sphere: {:?}", err)),
-        }
-    }
-
-    /// Join a sphere by its slug.
-    pub async fn join_sphere_by_slug(&self, slug: String) -> Result<()> {
-        match self
-            .request::<(), (), ()>("GET", &format!("spheres/{}/join", slug), None, None)
-            .await?
-        {
-            HttpResponse::Success(_) => Ok(()),
-            HttpResponse::Error(err) => Err(anyhow::anyhow!("Could not join sphere: {:?}", err)),
         }
     }
 }

@@ -48,6 +48,7 @@
 //! ```shell
 //! cargo doc -p eludrs --open
 //! ```
+mod builders;
 mod gateway;
 mod http;
 pub mod models;
