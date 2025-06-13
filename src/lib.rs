@@ -62,7 +62,7 @@ pub mod todel {
 }
 
 /// The default rest url
-pub const REST_URL: &str = "https://eludris.tooty.xyz";
+pub const REST_URL: &str = "https://api.eludris.com";
 
 /// The default gateway url
-pub const GATEWAY_URL: &str = "wss://eludris.tooty.xyz/ws/";
+pub const GATEWAY_URL: &str = "wss://ws.eludris.com/";
